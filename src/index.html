@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IEC 脱机热力学诊断引擎 (无限多机组版)</title>
+    
+    <!-- 引入 Tailwind CSS 引擎以支持样式 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入 React 和 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- 引入 Recharts 图表库及其依赖 -->
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.12.0/umd/Recharts.js"></script>
+    
+    <!-- 引入 SheetJS 引擎以完美解析真正的 Excel (.xlsx/.xls) 文件 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- 引入 Babel 编译器以在浏览器中运行 JSX 代码 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            background-color: #020617;
+            color: #e2e8f0;
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        /* 隐藏滚动条但保留功能 */
+        ::-webkit-scrollbar { width: 6px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        
+        /* 优化 Brush 滑块的光标体验与样式 */
+        .recharts-brush-traveller { cursor: ew-resize !important; }
+        .recharts-brush-slide { fill: rgba(59, 130, 246, 0.2) !important; }
+
+        /* 拖拽排序相关样式强化 */
+        .draggable-item {
+            cursor: grab;
+            transition: transform 0.1s ease, box-shadow 0.2s ease, opacity 0.2s;
+        }
+        .draggable-item:active {
+            cursor: grabbing;
+        }
+        .dragging {
+            opacity: 0.3 !important;
+            background-color: #1e293b !important;
+            border: 2px dashed #3b82f6 !important;
+            transform: scale(0.98);
+        }
+        
+        /* 消除数字输入框默认的上下箭头 */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        const { useState, useEffect, useRef, useCallback } = React;
+        const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, Brush } = window.Recharts;
+
+        // ==========================================
+        // 0. 内置 SVG 图标组件
+        // ==========================================
+        const Icon = ({ children, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {children}
+            </svg>
+        );
+        const Activity = ({ className }) => <Icon className={className}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></Icon>;
+        const UploadCloud = ({ className }) => <Icon className={className}><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m16 16-4-4-4 4"></path></Icon>;
+        const FolderOpen = ({ className }) => <Icon className={className}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></Icon>;
+        const Trash2 = ({ className }) => <Icon className={className}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></Icon>;
+        const Settings2 = ({ className }) => <Icon className={className}><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></Icon>;
+        const Droplet = ({ className }) => <Icon className={className}><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"></path></Icon>;
+        const Wind = ({ className }) => <Icon className={className}><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/></Icon>;
+        const AlertTriangle = ({ className }) => <Icon className={className}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></Icon>;
+        const CheckCircle2 = ({ className }) => <Icon className={className}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></Icon>;
+        const FileText = ({ className }) => <Icon className={className}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></Icon>;
+        const Server = ({ className }) => <Icon className={className}><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></Icon>;
+        const GripVertical = ({ className }) => <Icon className={className}><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></Icon>;
+        const RefreshCw = ({ className }) => <Icon className={className}><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></Icon>;
+        const Maximize2 = ({ className }) => <Icon className={className}><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></Icon>;
+
+        // 多机组对比图表颜色组
+        const UNIT_COLORS = [
+            '#0ea5e9', '#ec4899', '#22c55e', '#eab308', '#a855f7', '#f43f5e', '#14b8a6', '#f97316', 
+            '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#d946ef', '#84cc16'
+        ];
+
+        // ==========================================
+        // 1. 核心业务与辅助组件
+        // ==========================================
+        const getHumidity = (T, RH) => {
+            const Es = 6.112 * Math.exp((17.67 * T) / (T + 243.5));
+            const E = (RH / 100) * Es;
+            return (622 * E) / (1013.25 - E);
+        };
+
+        const getDewPoint = (T, RH) => {
+            const L = Math.log(RH / 100) + (17.27 * T) / (237.7 + T);
+            return (237.7 * L) / (17.27 - L);
+        };
+
+        // 自定义纵向范围滑块 (Vertical Brush) - 修复溢出与卡顿 (Debounced)
+        const VerticalBrush = ({ min, max, value, onChange, label, onReset }) => {
+            const [dragTarget, setDragTarget] = useState(null);
+            const trackRef = useRef(null);
+            
+            // 安全的数字解析器
+            const getNum = (v, fallback) => (v === '' || isNaN(v) || v === null || v === undefined) ? fallback : Number(v);
+
+            // 本地状态：用于防抖与极速交互渲染
+            const [localValue, setLocalValue] = useState({
+                min: value.min,
+                max: value.max
+            });
+
+            // 同步外部状态 (仅在未拖拽时)
+            useEffect(() => {
+                if (dragTarget) return; 
+                setLocalValue({ min: value.min, max: value.max });
+            }, [value.min, value.max, dragTarget]);
+
+            const currentMin = getNum(localValue.min, min);
+            const currentMax = getNum(localValue.max, max);
+
+            // 安全渲染阈值 (防止滑块在视觉轴外溢出)
+            const safeCurrentMin = Math.max(min, Math.min(currentMin, currentMax - 0.1));
+            const safeCurrentMax = Math.min(max, Math.max(currentMax, currentMin + 0.1));
+
+            const handlePointerDown = (e, target) => {
+                setDragTarget(target);
+                // 捕获鼠标事件，即使鼠标移出滑块区域也能继续拖拽
+                e.target.setPointerCapture(e.pointerId);
+                e.stopPropagation();
+            };
+
+            const handlePointerMove = useCallback((e) => {
+                if (!dragTarget || !trackRef.current) return;
+                const rect = trackRef.current.getBoundingClientRect();
+                
+                // 限制 Y 坐标在轨道内，彻底杜绝计算越界
+                let y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+                let percentage = 1 - (y / rect.height);
+                let val = min + percentage * (max - min);
+
+                setLocalValue(prev => {
+                    let next = { ...prev };
+                    let pMin = getNum(prev.min, min);
+                    let pMax = getNum(prev.max, max);
+
+                    if (dragTarget === 'max') {
+                        next.max = Math.max(val, pMin + 0.2); // 保证上下滑块不重叠穿越
+                    } else {
+                        next.min = Math.min(val, pMax - 0.2);
+                    }
+                    return next;
+                });
+            }, [dragTarget, min, max]);
+
+            const handlePointerUp = (e) => {
+                if (dragTarget) {
+                    // 仅在松开鼠标时触发 Recharts 重绘 (性能优化的核心)
+                    onChange({
+                        min: Number(getNum(localValue.min, min).toFixed(1)),
+                        max: Number(getNum(localValue.max, max).toFixed(1))
+                    });
+                    setDragTarget(null);
+                    e.target.releasePointerCapture(e.pointerId);
+                }
+            };
+
+            const handleInputChange = (e, type) => {
+                const valStr = e.target.value;
+                const val = valStr === '' ? '' : Number(valStr);
+                setLocalValue(prev => ({ ...prev, [type]: val }));
+                // 输入框直接触发重绘
+                onChange(prev => ({ ...prev, [type]: val }));
+            };
+
+            const percentMin = Math.max(0, Math.min(100, ((safeCurrentMin - min) / (max - min)) * 100)) || 0;
+            const percentMax = Math.max(0, Math.min(100, ((safeCurrentMax - min) / (max - min)) * 100)) || 100;
+
+            return (
+                <div className="flex flex-col items-center justify-between h-full w-14 shrink-0 py-2 select-none border-r border-slate-800 pr-2 mr-2">
+                    <div className="flex items-center w-full justify-between mb-2 px-1">
+                        <span className="text-[10px] text-slate-500 font-bold">{label}</span>
+                        <button onClick={() => { setLocalValue({min, max}); onReset(); }} title="重置视角" className="text-slate-500 hover:text-blue-400 transition-colors">
+                            <RefreshCw className="w-3 h-3" />
+                        </button>
+                    </div>
+                    
+                    <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded text-center text-[10px] text-blue-300 focus:border-blue-500 mb-1 py-1"
+                        value={localValue.max === '' ? '' : Number(localValue.max).toFixed(1)}
+                        onChange={e => handleInputChange(e, 'max')}
+                    />
+                    
+                    <div className="flex-1 relative w-2 bg-slate-900 rounded-full border border-slate-700 my-2" ref={trackRef}>
+                        {/* 蓝色有效区间带 */}
+                        <div className="absolute w-full bg-blue-500/50 rounded-full transition-all duration-75" style={{ bottom: `${percentMin}%`, height: `${percentMax - percentMin}%` }} />
+                        
+                        {/* 上限抓手 */}
+                        <div className="absolute w-5 h-2.5 bg-slate-300 rounded cursor-ns-resize shadow hover:bg-white hover:scale-110 transition-transform border border-slate-500 flex items-center justify-center"
+                            style={{ bottom: `calc(${percentMax}% - 5px)`, left: '-7px', zIndex: dragTarget === 'max' ? 10 : 1 }}
+                            onPointerDown={(e) => handlePointerDown(e, 'max')}
+                            onPointerMove={handlePointerMove}
+                            onPointerUp={handlePointerUp}
+                            onPointerLeave={handlePointerUp}
+                        >
+                            <div className="w-2 h-[1px] bg-slate-500"></div>
+                        </div>
+                        
+                        {/* 下限抓手 */}
+                        <div className="absolute w-5 h-2.5 bg-slate-300 rounded cursor-ns-resize shadow hover:bg-white hover:scale-110 transition-transform border border-slate-500 flex items-center justify-center"
+                            style={{ bottom: `calc(${percentMin}% - 5px)`, left: '-7px', zIndex: dragTarget === 'min' ? 10 : 1 }}
+                            onPointerDown={(e) => handlePointerDown(e, 'min')}
+                            onPointerMove={handlePointerMove}
+                            onPointerUp={handlePointerUp}
+                            onPointerLeave={handlePointerUp}
+                        >
+                            <div className="w-2 h-[1px] bg-slate-500"></div>
+                        </div>
+                    </div>
+                    
+                    <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded text-center text-[10px] text-blue-300 focus:border-blue-500 mt-1 py-1"
+                        value={localValue.min === '' ? '' : Number(localValue.min).toFixed(1)}
+                        onChange={e => handleInputChange(e, 'min')}
+                    />
+                </div>
+            );
+        };
+
+        // ==========================================
+        // 2. 主程序组件
+        // ==========================================
+        function IecDiagnosticApp() {
+            const [globalTimeMap, setGlobalTimeMap] = useState({}); 
+            const [rawUnitsDict, setRawUnitsDict] = useState({});   
+            
+            const [allUnitsData, setAllUnitsData] = useState({});
+            const [selectedUnits, setSelectedUnits] = useState([]); 
+            const [orderedUnits, setOrderedUnits] = useState([]);
+            const [chartData, setChartData] = useState([]);
+            const [stats, setStats] = useState({}); 
+            
+            const [threshold, setThreshold] = useState(0.4);
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [isMultiUnitMode, setIsMultiUnitMode] = useState(true);
+
+            // 颗粒度调控状态
+            const [tempAbsDomain, setTempAbsDomain] = useState({ min: 0, max: 50 });
+            const [deltaAbsDomain, setDeltaAbsDomain] = useState({ min: -3, max: 3 });
+            const [tempDomain, setTempDomain] = useState({ min: '', max: '' });
+            const [deltaDomain, setDeltaDomain] = useState({ min: '', max: '' });
+
+            const isSingleUnit = selectedUnits.length === 1;
+            const singleUnitId = isSingleUnit ? selectedUnits[0] : null;
+
+            const handleClearData = () => {
+                if (window.confirm("确定要清空内存中所有累积的机组数据吗？")) {
+                    setGlobalTimeMap({});
+                    setRawUnitsDict({});
+                    setAllUnitsData({});
+                    setSelectedUnits([]);
+                    setOrderedUnits([]);
+                    setChartData([]);
+                    setTempDomain({ min: '', max: '' });
+                    setDeltaDomain({ min: '', max: '' });
+                }
+            };
+
+            const handleFileUpload = async (event) => {
+                const files = event.target.files;
+                if (!files.length) return;
+                setIsProcessing(true);
+
+                const tempGlobalData = {}; 
+                const tempUnitsDict = {};
+
+                try {
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        const buffer = await file.arrayBuffer();
+                        const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: true });
+                        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const rows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+                        
+                        if (!rows || rows.length === 0) continue;
+
+                        let headerRowIdx = -1;
+                        let tIdx = -1, sIdx = -1, vIdx = -1, eqIdx = -1;
+
+                        for (let j = 0; j < Math.min(rows.length, 5); j++) {
+                            const row = rows[j];
+                            tIdx = row.findIndex(c => c !== "" && String(c).includes("时间"));
+                            if (tIdx !== -1) {
+                                headerRowIdx = j;
+                                sIdx = row.findIndex(c => c !== "" && (String(c) === "信号" || String(c).includes("测点名称") || String(c).includes("点位名称")));
+                                
+                                vIdx = row.findIndex(c => c !== "" && String(c).includes("平均"));
+                                if (vIdx === -1) vIdx = row.findIndex(c => c !== "" && String(c).includes("测点值"));
+                                if (vIdx === -1) vIdx = row.findIndex(c => c !== "" && String(c).includes("值") && !String(c).includes("最大") && !String(c).includes("最小"));
+                                if (vIdx === -1) vIdx = row.findIndex(c => c !== "" && String(c).includes("值"));
+                                
+                                eqIdx = row.findIndex(c => c !== "" && (String(c).includes("设备名称") || String(c) === "设备" || String(c).includes("机房") || String(c).includes("设备编码")));
+                                break;
+                            }
+                        }
+
+                        if (tIdx === -1) continue;
+
+                        for (let j = headerRowIdx + 1; j < rows.length; j++) {
+                            const row = rows[j];
+                            if (!row || row.length <= Math.max(tIdx, vIdx) || row[tIdx] === "" || row[vIdx] === "") continue;
+
+                            let d;
+                            const tCell = row[tIdx];
+
+                            if (tCell instanceof Date) {
+                                d = new Date(tCell.getTime());
+                            } else if (typeof tCell === 'number') {
+                                d = new Date(Math.round((tCell - 25569) * 86400 * 1000));
+                            } else {
+                                let tStr = String(tCell).replace("T", " ").replace(/-/g, "/").replace(/["']/g, '');
+                                d = new Date(tStr);
+                            }
+
+                            if (isNaN(d.getTime())) continue;
+
+                            d.setMinutes(d.getMinutes() + 30);
+                            d.setMinutes(0, 0, 0);
+                            
+                            const month = String(d.getMonth() + 1).padStart(2, '0');
+                            const day = String(d.getDate()).padStart(2, '0');
+                            const hours = String(d.getHours()).padStart(2, '0');
+                            const timeKey = `${month}-${day} ${hours}:00`;
+                            const timestamp = d.getTime();
+
+                            const signal = sIdx !== -1 ? String(row[sIdx]).replace(/["']/g, '') : file.name;
+                            if (signal.includes("最小") || signal.includes("最大")) continue;
+
+                            const val = parseFloat(row[vIdx]);
+                            if (isNaN(val)) continue;
+
+                            const searchStr = file.name + "|" + signal;
+                            let isGlobal = searchStr.includes("室外") || searchStr.includes("干球") || searchStr.includes("楼顶");
+
+                            if (isGlobal) {
+                                if (!tempGlobalData[timeKey]) tempGlobalData[timeKey] = {};
+                                if (searchStr.includes("干球") || searchStr.includes("温度")) tempGlobalData[timeKey].OA_T = val;
+                                if (searchStr.includes("湿度")) tempGlobalData[timeKey].OA_RH = val;
+                            } else {
+                                let targetUnitId = "主设备"; 
+                                if (isMultiUnitMode) {
+                                    const folderName = file.webkitRelativePath ? file.webkitRelativePath.split('/')[0] : null;
+                                    let rawEqName = (eqIdx !== -1 && row[eqIdx]) ? String(row[eqIdx]).trim() : file.name;
+                                    let match = rawEqName.match(/(\d+-\d+-\d+|AHU[-_]?\d+|[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+)/i);
+                                    
+                                    if (folderName && folderName !== "") {
+                                        targetUnitId = `机组_${folderName}`; 
+                                    } else if (match) {
+                                        targetUnitId = match[0];
+                                    } else {
+                                        targetUnitId = rawEqName.replace(/\.(csv|xlsx|xls)$/i, '')
+                                            .replace(/(出风口温度|出风口湿度|回风温度|回风湿度|芯体|室内|压缩机\d*开启状态|喷淋开启状态|状态|数据|_1|-已恢复|Sheet\d+|平均值|最小|最大|点位|测点|信号)/gi, '')
+                                            .replace(/[-_\s]+$/, '').trim();
+                                        if (!targetUnitId) targetUnitId = "未命名分类";
+                                    }
+                                }
+
+                                if (!tempUnitsDict[targetUnitId]) tempUnitsDict[targetUnitId] = {};
+                                if (!tempUnitsDict[targetUnitId][timeKey]) {
+                                    tempUnitsDict[targetUnitId][timeKey] = {
+                                        time: timeKey, timestamp,
+                                        RA_T: null, RA_RH: null, SA_T: null, SA_RH: null,
+                                        Spray: null, DX: null, Core_T: null, _coreTSum: 0, _coreTCount: 0
+                                    };
+                                }
+                                
+                                let uData = tempUnitsDict[targetUnitId][timeKey];
+
+                                if (searchStr.includes("芯体") && searchStr.includes("出风温度")) {
+                                    uData._coreTSum += val; uData._coreTCount += 1;
+                                    uData.Core_T = uData._coreTSum / uData._coreTCount;
+                                } else if (searchStr.includes("回风温度")) {
+                                    uData.RA_T = val;
+                                } else if (searchStr.includes("回风湿度")) {
+                                    uData.RA_RH = val;
+                                } else if (searchStr.includes("出风口温度") || searchStr.includes("送风温度")) {
+                                    uData.SA_T = val;
+                                } else if (searchStr.includes("出风口湿度") || searchStr.includes("送风湿度")) {
+                                    uData.SA_RH = val;
+                                } else if (searchStr.includes("喷淋")) {
+                                    uData.Spray = Math.max(uData.Spray || 0, val > 0 ? 1 : 0);
+                                } else if (searchStr.includes("压缩机")) {
+                                    uData.DX = Math.max(uData.DX || 0, val > 0 ? 1 : 0);
+                                }
+                            }
+                        }
+                    }
+
+                    setGlobalTimeMap(prev => {
+                        const next = { ...prev };
+                        Object.keys(tempGlobalData).forEach(k => {
+                            next[k] = { ...(next[k] || {}), ...tempGlobalData[k] };
+                        });
+                        return next;
+                    });
+
+                    setRawUnitsDict(prev => {
+                        const next = { ...prev };
+                        Object.keys(tempUnitsDict).forEach(uId => {
+                            if (!next[uId]) next[uId] = {};
+                            Object.keys(tempUnitsDict[uId]).forEach(tKey => {
+                                next[uId][tKey] = { ...(next[uId][tKey] || {}), ...tempUnitsDict[uId][tKey] };
+                            });
+                        });
+                        return next;
+                    });
+
+                } catch (error) {
+                    console.error("文件解析失败:", error);
+                    alert("文件解析过程中出现错误，请确保 Excel 文件格式正确。");
+                } finally {
+                    setIsProcessing(false);
+                    event.target.value = null; 
+                }
+            };
+
+            // 数据提取与排序整合
+            useEffect(() => {
+                const finalParsedUnits = {};
+                for (const uId in rawUnitsDict) {
+                    let arr = [];
+                    for (const timeKey in rawUnitsDict[uId]) {
+                        let item = { ...rawUnitsDict[uId][timeKey] };
+                        let g = globalTimeMap[timeKey] || {};
+                        item.OA_T = g.OA_T ?? item.OA_T ?? null;
+                        item.OA_RH = g.OA_RH ?? item.OA_RH ?? null;
+                        
+                        if (item.RA_T !== null && item.RA_RH !== null && item.OA_T !== null && item.OA_RH !== null) {
+                            arr.push(item);
+                        }
+                    }
+                    if (arr.length > 0) {
+                        arr.sort((a, b) => a.timestamp - b.timestamp);
+                        finalParsedUnits[uId] = arr;
+                    }
+                }
+                
+                setAllUnitsData(finalParsedUnits);
+                const availableUnits = Object.keys(finalParsedUnits);
+                
+                setOrderedUnits(prev => {
+                    const existing = prev.filter(u => availableUnits.includes(u));
+                    const newUnits = availableUnits.filter(u => !prev.includes(u));
+                    return [...existing, ...newUnits];
+                });
+
+                setSelectedUnits(prev => {
+                    const valid = prev.filter(u => availableUnits.includes(u));
+                    if (valid.length === 0 && availableUnits.length > 0) return [availableUnits[0]];
+                    return valid;
+                });
+            }, [rawUnitsDict, globalTimeMap]);
+
+            // 动态计算 Y 轴绝对边界
+            useEffect(() => {
+                if (chartData.length > 0) {
+                    let minT = Infinity, maxT = -Infinity;
+                    let minD = Infinity, maxD = -Infinity;
+                    
+                    chartData.forEach(d => {
+                        Object.keys(d).forEach(k => {
+                            if (k.endsWith('_RA_T') || k.endsWith('_SA_T') || k.endsWith('_Core_T')) {
+                                if (d[k] < minT) minT = d[k];
+                                if (d[k] > maxT) maxT = d[k];
+                            }
+                            if (k.endsWith('_delta_d')) {
+                                if (d[k] < minD) minD = d[k];
+                                if (d[k] > maxD) maxD = d[k];
+                            }
+                        });
+                    });
+                    
+                    minT = minT === Infinity ? 0 : Math.floor(minT) - 2;
+                    maxT = maxT === -Infinity ? 50 : Math.ceil(maxT) + 2;
+                    minD = minD === Infinity ? -2 : Math.floor(minD) - 1;
+                    maxD = maxD === -Infinity ? 2 : Math.ceil(maxD) + 1;
+
+                    setTempAbsDomain({ min: minT, max: maxT });
+                    setDeltaAbsDomain({ min: minD, max: maxD });
+
+                    setTempDomain(prev => {
+                        if (prev.min === '' || prev.max === '') return { min: minT, max: maxT };
+                        return prev;
+                    });
+                    setDeltaDomain(prev => {
+                        if (prev.min === '' || prev.max === '') return { min: minD, max: maxD };
+                        return prev;
+                    });
+                }
+            }, [chartData]);
+
+            const toggleUnit = (u) => {
+                if (selectedUnits.includes(u)) {
+                    if (selectedUnits.length > 1) { 
+                        setSelectedUnits(selectedUnits.filter(x => x !== u));
+                    }
+                } else {
+                    setSelectedUnits([...selectedUnits, u]);
+                }
+            };
+
+            // 拖拽排序逻辑
+            const handleDragStart = (e, unit) => {
+                setDraggedUnit(unit);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", unit);
+                setTimeout(() => e.target.classList.add('dragging'), 0);
+            };
+            const handleDragOver = (e, unit) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+            };
+            const handleDrop = (e, targetUnit) => {
+                e.preventDefault();
+                const sourceUnit = e.dataTransfer.getData("text/plain");
+                if (!sourceUnit || sourceUnit === targetUnit) return;
+
+                const newOrderedUnits = [...orderedUnits];
+                const draggedIndex = newOrderedUnits.indexOf(sourceUnit);
+                const targetIndex = newOrderedUnits.indexOf(targetUnit);
+
+                newOrderedUnits.splice(draggedIndex, 1);
+                newOrderedUnits.splice(targetIndex, 0, sourceUnit);
+
+                setOrderedUnits(newOrderedUnits);
+                setDraggedUnit(null);
+            };
+            const handleDragEnd = (e) => {
+                e.target.classList.remove('dragging');
+                setDraggedUnit(null);
+            };
+
+            // FDD 渲染数据生成
+            useEffect(() => {
+                if (selectedUnits.length === 0) {
+                    setChartData([]);
+                    return;
+                }
+
+                const timeMap = {};
+                const multiStats = {};
+                const orderedSelectedUnits = orderedUnits.filter(u => selectedUnits.includes(u));
+
+                orderedSelectedUnits.forEach((unit, idx) => {
+                    const rawData = allUnitsData[unit];
+                    if (!rawData) return;
+                    
+                    multiStats[unit] = { total: rawData.length, healthy: 0, water: 0, airCore: 0, airBox: 0, stop: 0 };
+
+                    rawData.forEach(item => {
+                        const time = item.time;
+                        if (!timeMap[time]) timeMap[time] = { time, timestamp: item.timestamp };
+                        
+                        const dRA = getHumidity(item.RA_T, item.RA_RH);
+                        const dSA = getHumidity(item.SA_T, item.SA_RH);
+                        const dOA = getHumidity(item.OA_T, item.OA_RH);
+                        const delta_d = dSA - dRA;
+                        const tdpRA = getDewPoint(item.RA_T, item.RA_RH);
+
+                        let status = "健康运转";
+                        let statusId = "Healthy";
+
+                        if (item.RA_T < 25) {
+                            status = "停机/非稳态"; statusId = "Stop";
+                        } else if (item.DX === 1) {
+                            status = "DX除湿掩盖"; statusId = "Stop";
+                        } else if (delta_d > threshold) {
+                            if (dOA > dRA) { 
+                                if (item.Core_T !== null && item.Core_T < item.RA_T - 8) {
+                                    status = "高危(芯体段漏水)"; statusId = "Water";
+                                } else if (item.Core_T !== null && (item.SA_T - item.Core_T) > 2.5) {
+                                    status = "中危(芯体到风机段漏风)"; statusId = "AirBox";
+                                } else {
+                                    status = "中危(芯体段漏风)"; statusId = "AirCore";
+                                }
+                            } else {
+                                status = "高危(疑似芯体段漏水)"; statusId = "Water";
+                            }
+                        } else if (delta_d < -threshold) {
+                            if (item.SA_T <= tdpRA + 1) {
+                                status = "正常(物理结露)"; statusId = "Condensate";
+                            } else if (dOA < dRA) { 
+                                if (item.Core_T !== null && (item.SA_T - item.Core_T) < 0.5) {
+                                    status = "高危(芯体到风机段漏风)"; statusId = "AirBox";
+                                } else {
+                                    status = "高危(芯体段漏风)"; statusId = "AirCore";
+                                }
+                            } else {
+                                status = "传感器异常"; statusId = "Stop";
+                            }
+                        }
+
+                        if (statusId === "Healthy" || statusId === "Condensate") multiStats[unit].healthy++;
+                        if (statusId === "Water") multiStats[unit].water++;
+                        if (statusId === "AirCore") multiStats[unit].airCore++;
+                        if (statusId === "AirBox") multiStats[unit].airBox++;
+                        if (statusId === "Stop") multiStats[unit].stop++;
+
+                        timeMap[time][`${unit}_RA_T`] = item.RA_T;
+                        timeMap[time][`${unit}_Core_T`] = item.Core_T;
+                        timeMap[time][`${unit}_SA_T`] = item.SA_T;
+                        timeMap[time][`${unit}_delta_d`] = delta_d;
+                        timeMap[time][`${unit}_Status`] = status;
+
+                        // 甘特图 Y 轴错层布局
+                        const offset = idx * 4; 
+                        timeMap[time][`${unit}_ganttDX`] = item.DX === 1 ? (3 + offset) : null;
+                        timeMap[time][`${unit}_ganttSpray`] = item.Spray === 1 ? (2 + offset) : null;
+                        
+                        const baseY = 1 + offset;
+                        timeMap[time][`${unit}_gHealthy`] = statusId === "Healthy" ? baseY : null;
+                        timeMap[time][`${unit}_gWater`] = statusId === "Water" ? baseY : null;
+                        timeMap[time][`${unit}_gAir`] = (statusId === "AirCore" || statusId === "AirBox") ? baseY : null;
+                        timeMap[time][`${unit}_gStop`] = statusId === "Stop" ? baseY : null;
+                        timeMap[time][`${unit}_gCondensate`] = statusId === "Condensate" ? baseY : null;
+                    });
+                });
+
+                setChartData(Object.values(timeMap).sort((a, b) => a.timestamp - b.timestamp));
+                setStats(multiStats);
+
+            }, [allUnitsData, selectedUnits, threshold, orderedUnits]);
+
+            let aggTotal = 0, aggHealthy = 0, aggWater = 0, aggAir = 0;
+            Object.values(stats).forEach(s => {
+                aggTotal += s.total;
+                aggHealthy += s.healthy;
+                aggWater += s.water;
+                aggAir += (s.airCore + s.airBox);
+            });
+
+            const CustomTooltip = ({ active, payload, label }) => {
+                if (active && payload && payload.length) {
+                    return (
+                        <div className="bg-slate-800/95 backdrop-blur border border-slate-600 p-3 rounded-xl shadow-2xl text-sm z-50 max-h-[400px] overflow-y-auto">
+                            <p className="text-slate-300 font-bold mb-2 pb-1 border-b border-slate-700/50">时间：{label}</p>
+                            {payload.map((entry, index) => {
+                                if (entry.dataKey.includes('gantt') || entry.dataKey.match(/_g[A-Z]/)) return null;
+                                return (
+                                    <div key={index} className="flex justify-between gap-4 py-0.5" style={{ color: entry.color }}>
+                                        <span>{entry.name}:</span>
+                                        <span className="font-bold">{entry.value !== null && entry.value !== undefined ? Number(entry.value).toFixed(2) : '-'}</span>
+                                    </div>
+                                );
+                            })}
+                            <div className="mt-2 pt-2 border-t border-slate-600/50 space-y-1">
+                                {orderedUnits.filter(u => selectedUnits.includes(u)).map(unit => {
+                                    const st = payload[0].payload[`${unit}_Status`];
+                                    if (!st) return null;
+                                    return (
+                                        <div key={unit} className="flex justify-between text-xs">
+                                            <span className="text-slate-400">{isSingleUnit ? "系统诊断:" : `${unit}:`}</span>
+                                            <span className="font-bold text-white ml-2">{st}</span>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    );
+                }
+                return null;
+            };
+
+            const renderAnalyticalSummary = () => {
+                if (!chartData.length || selectedUnits.length === 0) return null;
+                
+                let reportBlocks = orderedUnits.filter(u => selectedUnits.includes(u)).map(unit => {
+                    const unitStats = stats[unit];
+                    if (!unitStats || unitStats.total === 0) return null;
+
+                    let alerts = [];
+                    if (unitStats.water > 0) alerts.push(`💧 疑似芯体段漏水（${unitStats.water} 帧报警）`);
+                    if (unitStats.airCore > 0) alerts.push(`💨 疑似芯体段漏风（${unitStats.airCore} 帧报警）`);
+                    if (unitStats.airBox > 0) alerts.push(`🌪️ 疑似芯体到风机段漏风（${unitStats.airBox} 帧报警）`);
+
+                    return (
+                        <div key={unit} className="mb-4 pb-4 border-b border-slate-700/50 last:border-0 last:mb-0 last:pb-0">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="font-bold text-blue-300">机组标签：[{unit}]</span>
+                                <span className="text-xs text-slate-400 font-mono">提取有效节点: {unitStats.total}</span>
+                            </div>
+                            {alerts.length > 0 ? (
+                                <div className="text-sm font-medium text-red-300 space-y-1.5 pl-2 border-l-2 border-red-500/50">
+                                    {alerts.map((a, i) => <div key={i}>{a}</div>)}
+                                </div>
+                            ) : (
+                                <div className="text-sm text-green-400 flex items-center bg-green-500/10 p-2 rounded">
+                                    <CheckCircle2 className="w-4 h-4 mr-1.5" /> 各项参数达标，未见明显漏点特征
+                                </div>
+                            )}
+                        </div>
+                    );
+                });
+
+                return (
+                    <div className="bg-slate-900 border border-blue-500/30 rounded-xl p-5 shadow-[0_0_15px_rgba(59,130,246,0.1)] relative overflow-hidden mb-6">
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
+                        <h3 className="text-lg font-bold text-blue-300 flex items-center mb-4 relative z-10">
+                            <FileText className="w-5 h-5 mr-2" /> 多机组 FDD 智能诊断大字报
+                        </h3>
+                        <div className="relative z-10 bg-slate-950 p-4 rounded-lg border border-slate-800 max-h-[300px] overflow-y-auto">
+                            {reportBlocks}
+                        </div>
+                    </div>
+                );
+            };
+
+            const ganttHeight = Math.max(250, selectedUnits.length * 110);
+            const orderedSelectedUnits = orderedUnits.filter(u => selectedUnits.includes(u));
+
+            return (
+                <div className="min-h-screen text-slate-200 p-6 font-sans">
+                    {/* 顶部控制区 */}
+                    <div className="max-w-[1450px] mx-auto mb-6 bg-slate-900 rounded-xl p-6 border border-slate-800 shadow-2xl flex flex-col xl:flex-row items-center justify-between gap-6">
+                        <div className="flex items-center gap-4 w-full xl:w-auto">
+                            <div className="p-3 bg-blue-500/10 rounded-lg shrink-0">
+                                <Activity className="w-8 h-8 text-blue-400" />
+                            </div>
+                            <div>
+                                <h1 className="text-xl md:text-2xl font-bold text-white tracking-wide">IEC FDD 边缘诊断引擎</h1>
+                                <p className="text-sm text-slate-400 mt-1">全局时间联动 | 纵向防抖滑块 | 拖拽排序</p>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-wrap items-center justify-center w-full gap-3">
+                            <label className="flex items-center justify-center w-full md:w-auto px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg cursor-pointer hover:bg-slate-700 hover:border-blue-400 transition-all shadow-md shrink-0">
+                                <UploadCloud className="w-5 h-5 text-blue-400 mr-2" />
+                                <span className="text-sm font-medium text-white">{isProcessing ? "数据融合中..." : "选择 Excel 导入"}</span>
+                                <input type="file" multiple accept=".csv, .xlsx, .xls" className="hidden" onChange={handleFileUpload} />
+                            </label>
+                            
+                            <label className="flex items-center justify-center w-full md:w-auto px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg cursor-pointer hover:bg-slate-700 hover:border-blue-400 transition-all shadow-md shrink-0">
+                                <FolderOpen className="w-5 h-5 text-indigo-400 mr-2" />
+                                <span className="text-sm font-medium text-white">{isProcessing ? "目录穿透中..." : "选择文件夹导入"}</span>
+                                <input type="file" webkitdirectory="true" directory="true" multiple className="hidden" onChange={handleFileUpload} />
+                            </label>
+
+                            <button onClick={handleClearData} className="flex items-center justify-center w-full md:w-auto px-4 py-2.5 bg-red-950/30 border border-red-900/50 rounded-lg cursor-pointer hover:bg-red-900/50 hover:border-red-500 transition-all shadow-md shrink-0 text-red-400 hover:text-red-300">
+                                <Trash2 className="w-5 h-5 mr-2" />
+                                <span className="text-sm font-medium">清空数据</span>
+                            </button>
+                            
+                            <div className="flex items-center justify-center w-full md:w-auto px-4 py-2.5 bg-slate-950 border border-slate-700 rounded-lg shadow-sm shrink-0">
+                                <span className="text-xs text-slate-400 mr-3 font-bold">按编号拆分机组</span>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" className="sr-only peer" checked={isMultiUnitMode} onChange={(e) => setIsMultiUnitMode(e.target.checked)} />
+                                    <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center w-full xl:w-auto gap-4 bg-slate-950 p-3 rounded-lg border border-slate-800 shrink-0">
+                            <Settings2 className="w-5 h-5 text-slate-400" />
+                            <div className="flex flex-col w-full">
+                                <span className="text-xs text-slate-400 mb-1">含湿量确诊基准线 (Δd)</span>
+                                <div className="flex items-center gap-3">
+                                    <input type="range" min="0.1" max="1.5" step="0.1" value={threshold} 
+                                        onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                                        className="w-full xl:w-32 accent-blue-500" />
+                                    <span className="text-sm font-bold w-6 text-blue-400">{threshold}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 大屏图表渲染区 */}
+                    {chartData.length > 0 ? (
+                        <div className="max-w-[1450px] mx-auto flex flex-col xl:flex-row gap-6 items-start">
+                            
+                            {/* 左侧主图表分析区 */}
+                            <div className="flex-1 w-full space-y-6 overflow-hidden">
+                                
+                                {renderAnalyticalSummary()}
+
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                                        <div><p className="text-slate-400 text-sm">比对总节点</p><p className="text-2xl font-bold text-white">{aggTotal}</p></div>
+                                        <Activity className="text-slate-600 w-8 h-8 opacity-50" />
+                                    </div>
+                                    <div className="bg-slate-900 border border-green-900/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                                        <div><p className="text-slate-400 text-sm">健康运转</p><p className="text-2xl font-bold text-green-400">{aggHealthy}</p></div>
+                                        <CheckCircle2 className="text-green-500 w-8 h-8 opacity-50" />
+                                    </div>
+                                    <div className="bg-slate-900 border border-red-900/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                                        <div><p className="text-slate-400 text-sm">漏水报警数</p><p className="text-2xl font-bold text-red-400">{aggWater}</p></div>
+                                        <Droplet className="text-red-500 w-8 h-8 opacity-50" />
+                                    </div>
+                                    <div className="bg-slate-900 border border-orange-900/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                                        <div><p className="text-slate-400 text-sm">串风报警数</p><p className="text-2xl font-bold text-orange-400">{aggAir}</p></div>
+                                        <Wind className="text-orange-500 w-8 h-8 opacity-50" />
+                                    </div>
+                                </div>
+
+                                {/* 图 1: 三维空间 */}
+                                <div className="bg-slate-900 rounded-xl p-5 border border-slate-800 shadow-xl">
+                                    <h2 className="text-lg font-bold text-white flex items-center mb-4">
+                                        <Activity className="w-5 h-5 mr-2 text-blue-400"/>图 1: 温湿度偏差{isSingleUnit ? "三维空间解析" : "横向比对空间"}
+                                    </h2>
+                                    
+                                    <div className="flex flex-row h-[360px] items-stretch">
+                                        {/* 图 1 Y轴控制滑块 */}
+                                        <VerticalBrush 
+                                            min={tempAbsDomain.min} max={tempAbsDomain.max} 
+                                            value={tempDomain} onChange={setTempDomain} 
+                                            label="温度 ℃" onReset={() => setTempDomain({min: tempAbsDomain.min, max: tempAbsDomain.max})}
+                                        />
+                                        
+                                        <div className="flex-1 min-w-0 pb-2">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                {/* 【修复】：统一放大图表的左右外边距（右侧留足 50px，左侧留足 10px），并使用 allowDataOverflow 防止图表越界渲染 */}
+                                                <LineChart syncId="iec-charts" data={chartData} margin={{ top: 10, right: 60, left: 10, bottom: 5 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                                    <XAxis dataKey="time" stroke="#64748b" tick={{fontSize: 12}} minTickGap={40} />
+                                                    <YAxis stroke="#64748b" allowDataOverflow={true} domain={[
+                                                        tempDomain.min === '' ? 'dataMin - 2' : Number(tempDomain.min), 
+                                                        tempDomain.max === '' ? 'dataMax + 2' : Number(tempDomain.max)
+                                                    ]} />
+                                                    <Tooltip content={<CustomTooltip />} />
+                                                    <Legend iconType="circle" wrapperStyle={{ paddingTop: "10px" }} />
+                                                    
+                                                    {isSingleUnit ? (
+                                                        <React.Fragment>
+                                                            <Line type="monotone" dataKey={`${singleUnitId}_RA_T`} name="回风温度 (RA_T)" stroke="#ea580c" strokeWidth={2} dot={false} strokeOpacity={0.9} />
+                                                            <Line type="monotone" dataKey={`${singleUnitId}_Core_T`} name="芯体出风 (T_core)" stroke="#22c55e" strokeWidth={2} dot={false} strokeDasharray="5 5" />
+                                                            <Line type="monotone" dataKey={`${singleUnitId}_SA_T`} name="最终送风 (SA_T)" stroke="#0ea5e9" strokeWidth={2} dot={false} />
+                                                        </React.Fragment>
+                                                    ) : (
+                                                        orderedSelectedUnits.map((unit, idx) => (
+                                                            <React.Fragment key={unit}>
+                                                                <Line type="monotone" dataKey={`${unit}_RA_T`} name={`${unit} 回风`} stroke={UNIT_COLORS[idx % UNIT_COLORS.length]} strokeWidth={2} dot={false} strokeOpacity={0.9} />
+                                                                <Line type="monotone" dataKey={`${unit}_SA_T`} name={`${unit} 送风`} stroke={UNIT_COLORS[idx % UNIT_COLORS.length]} strokeWidth={2} dot={false} strokeDasharray="4 4" />
+                                                            </React.Fragment>
+                                                        ))
+                                                    )}
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 图 2: 偏差靶盘 */}
+                                <div className="bg-slate-900 rounded-xl p-5 border border-slate-800 shadow-xl">
+                                    <h2 className="text-lg font-bold text-white flex items-center mb-4">
+                                        <Droplet className="w-5 h-5 mr-2 text-purple-400"/>图 2: 含湿量偏差 (Δd) 靶盘 & 时间轴全局滑块
+                                    </h2>
+                                    <div className="flex flex-row h-[360px] items-stretch">
+                                        {/* 图 2 Y轴控制滑块 */}
+                                        <VerticalBrush 
+                                            min={deltaAbsDomain.min} max={deltaAbsDomain.max} 
+                                            value={deltaDomain} onChange={setDeltaDomain} 
+                                            label="Δd g/kg" onReset={() => setDeltaDomain({min: deltaAbsDomain.min, max: deltaAbsDomain.max})}
+                                        />
+                                        
+                                        <div className="flex-1 min-w-0 pb-2">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart syncId="iec-charts" data={chartData} margin={{ top: 10, right: 60, left: 10, bottom: 5 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                                    <XAxis dataKey="time" stroke="#64748b" tick={{fontSize: 12}} minTickGap={40} />
+                                                    <YAxis stroke="#64748b" allowDataOverflow={true} domain={[
+                                                        deltaDomain.min === '' ? -1.5 : Number(deltaDomain.min), 
+                                                        deltaDomain.max === '' ? 2.0 : Number(deltaDomain.max)
+                                                    ]} />
+                                                    <Tooltip content={<CustomTooltip />} />
+                                                    <Legend iconType="circle" verticalAlign="top" height={36} wrapperStyle={{ paddingBottom: "10px" }} />
+                                                    <ReferenceLine y={threshold} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: '漏水红线', fill: '#ef4444', fontSize: 12 }} />
+                                                    <ReferenceLine y={-threshold} stroke="#22c55e" strokeDasharray="3 3" label={{ position: 'bottom', value: '漏冷绿线', fill: '#22c55e', fontSize: 12 }} />
+                                                    
+                                                    {/* 全局联动 Brush 滑块 */}
+                                                    <Brush dataKey="time" height={40} stroke="#64748b" fill="#0f172a" tickFormatter={(v) => v.substring(0, 5)} travellerWidth={14} className="mt-4" />
+                                                    
+                                                    {isSingleUnit ? (
+                                                        <Line type="monotone" dataKey={`${singleUnitId}_delta_d`} name="Δd (增湿偏差)" stroke="#ec4899" strokeWidth={3} dot={false} />
+                                                    ) : (
+                                                        orderedSelectedUnits.map((unit, idx) => (
+                                                            <Line key={unit} type="monotone" dataKey={`${unit}_delta_d`} name={`${unit} Δd`} stroke={UNIT_COLORS[idx % UNIT_COLORS.length]} strokeWidth={3} dot={false} />
+                                                        ))
+                                                    )}
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 图 3: 状态甘特图 */}
+                                <div className="bg-slate-900 rounded-xl p-5 border border-slate-800 shadow-xl overflow-x-auto">
+                                    <h2 className="text-lg font-bold text-white flex items-center mb-4"><Settings2 className="w-5 h-5 mr-2 text-emerald-400"/>图 3: 并行状态甘特图 (Status Swimlane)</h2>
+                                    <div className="relative flex min-w-[700px]" style={{ height: `${ganttHeight}px` }}>
+                                        <div className="w-28 md:w-40 flex flex-col justify-between py-5 pr-3 text-right text-sm font-bold text-slate-300 border-r border-slate-700">
+                                            {orderedSelectedUnits.slice().reverse().map((unit, idx) => (
+                                                <div key={unit} className="flex flex-col justify-around h-full border-b border-slate-700/50 pb-2 mb-2 last:border-0">
+                                                    <div className="text-xs text-blue-400 bg-blue-500/10 rounded py-1 px-2 inline-block ml-auto mb-1 max-w-[130px] truncate" title={unit}>{isSingleUnit ? '单机组' : unit}</div>
+                                                    <div className="text-[10px] md:text-xs">L3 DX压机</div>
+                                                    <div className="text-[10px] md:text-xs">L2 喷淋</div>
+                                                    <div className="text-[10px] md:text-xs text-orange-300">L1 诊断</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="flex-1">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart syncId="iec-charts" data={chartData} margin={{ top: 10, right: 60, left: 10, bottom: 10 }}>
+                                                    <CartesianGrid strokeDasharray="5 5" stroke="#334155" horizontal={true} vertical={true} />
+                                                    <XAxis dataKey="time" stroke="#64748b" tick={{fontSize: 12}} minTickGap={40} />
+                                                    <YAxis domain={[0, selectedUnits.length * 4]} hide={true} />
+                                                    <Tooltip content={<CustomTooltip />} />
+                                                    <Legend verticalAlign="top" height={36} />
+                                                    
+                                                    {orderedSelectedUnits.map((unit, idx) => (
+                                                        <React.Fragment key={unit}>
+                                                            <Line type="step" connectNulls={false} dataKey={`${unit}_ganttDX`} name="DX 压机" legendType={idx === 0 ? "square" : "none"} stroke="#0ea5e9" strokeWidth={16} dot={false} isAnimationActive={false}/>
+                                                            <Line type="step" connectNulls={false} dataKey={`${unit}_ganttSpray`} name="喷淋运行" legendType={idx === 0 ? "square" : "none"} stroke="#2dd4bf" strokeWidth={16} dot={false} isAnimationActive={false}/>
+                                                            
+                                                            <Line type="step" connectNulls={false} dataKey={`${unit}_gHealthy`} name="健康稳态" legendType={idx === 0 ? "square" : "none"} stroke="#22c55e" strokeWidth={16} dot={false} isAnimationActive={false}/>
+                                                            <Line type="step" connectNulls={false} dataKey={`${unit}_gWater`} name="高危漏水" legendType={idx === 0 ? "square" : "none"} stroke="#f87171" strokeWidth={16} dot={false} isAnimationActive={false}/>
+                                                            <Line type="step" connectNulls={false} dataKey={`${unit}_gAir`} name="漏风报警" legendType={idx === 0 ? "square" : "none"} stroke="#fb923c" strokeWidth={16} dot={false} isAnimationActive={false}/>
+                                                            <Line type="step" connectNulls={false} dataKey={`${unit}_gStop`} name="停机/掩盖区" legendType={idx === 0 ? "square" : "none"} stroke="#64748b" strokeWidth={16} dot={false} isAnimationActive={false}/>
+                                                            <Line type="step" connectNulls={false} dataKey={`${unit}_gCondensate`} name="物理结露" legendType={idx === 0 ? "square" : "none"} stroke="#c084fc" strokeWidth={16} dot={false} isAnimationActive={false}/>
+                                                        </React.Fragment>
+                                                    ))}
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {/* 右侧悬浮侧边控制栏 (增强拖拽排序) */}
+                            <div className="w-full xl:w-[320px] shrink-0 flex flex-col sticky top-6">
+                                <div className="bg-slate-900 rounded-xl p-5 border border-slate-800 shadow-2xl">
+                                    <h3 className="text-white font-bold mb-4 flex items-center text-lg">
+                                        <Server className="w-5 h-5 mr-2 text-blue-400" />
+                                        渲染机组资源池
+                                    </h3>
+                                    <div className="text-xs text-slate-400 mb-4 pb-3 border-b border-slate-700/50 space-y-1">
+                                        <p>✅ 勾选单台：激活高定经典分析视图。</p>
+                                        <p>✅ 勾选多台：触发无限机组同频交叉对比。</p>
+                                        <p className="text-blue-400">🔥 拖动把手可改变机组图层和甘特图排序。</p>
+                                    </div>
+                                    
+                                    <div className="flex flex-col gap-2 max-h-[600px] overflow-y-auto pr-2 pb-4">
+                                        {orderedUnits.map((u, idx) => (
+                                            <div 
+                                                key={u} 
+                                                draggable 
+                                                onDragStart={(e) => handleDragStart(e, u)}
+                                                onDragOver={(e) => handleDragOver(e, u)}
+                                                onDrop={(e) => handleDrop(e, u)}
+                                                onDragEnd={handleDragEnd}
+                                                className={`draggable-item flex items-center p-3 rounded-lg border ${selectedUnits.includes(u) ? 'bg-blue-600/20 border-blue-500 shadow-md' : 'bg-slate-950/50 border-slate-700 hover:bg-slate-800'}`}
+                                            >
+                                                <div className="mr-2 text-slate-500 hover:text-slate-300 flex items-center justify-center" title="拖拽以排序">
+                                                    <GripVertical className="w-5 h-5" />
+                                                </div>
+                                                <label className="flex items-center w-full cursor-pointer overflow-hidden">
+                                                    <input type="checkbox" className="hidden" checked={selectedUnits.includes(u)} onChange={() => toggleUnit(u)} />
+                                                    <div className={`w-4 h-4 rounded flex items-center justify-center mr-3 border transition-colors shrink-0 ${selectedUnits.includes(u) ? 'bg-blue-500 border-blue-500' : 'border-slate-500 bg-slate-800'}`}>
+                                                        {selectedUnits.includes(u) && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                                    </div>
+                                                    <span className={`text-sm font-medium truncate flex-1 ${selectedUnits.includes(u) ? 'text-white' : 'text-slate-400'}`} title={u}>{u}</span>
+                                                </label>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-4 pt-4 border-t border-slate-700/50 text-xs text-slate-500 text-center font-mono bg-slate-950 py-2 rounded border border-slate-800">
+                                        已选中 {selectedUnits.length} 台机组渲染
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="max-w-3xl mx-auto mt-20 text-center text-slate-500 bg-slate-900/50 p-10 rounded-2xl border border-slate-800 border-dashed">
+                            <AlertTriangle className="w-16 h-16 mx-auto mb-4 opacity-20 text-blue-400" />
+                            <h3 className="text-xl font-bold mb-2 text-slate-300">等待数据注入...</h3>
+                            <div className="text-sm mb-4 space-y-2 text-slate-400">
+                                <p>您可以反复、分批次导入 Excel 文件，系统会自动将数据累积拼接。</p>
+                                <p>开启【按编号拆分】，甚至可以直接选择整个 <b>数据中心主文件夹</b>，引擎将瞬间剥离所有机组特征！</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<IecDiagnosticApp />);
+    </script>
+</body>
+</html>
